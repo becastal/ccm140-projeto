@@ -3,6 +3,7 @@ x-python: &python
     context: .
     dockerfile: python/Dockerfile
   image: cc7261:projeto-python
+  init: true
 
 x-servidor: &servidor
   <<: *python
@@ -16,6 +17,7 @@ x-bot: &bot
     context: .
     dockerfile: cpp/Dockerfile
   image: cc7261:projeto-cpp
+  init: true
   depends_on:
     - broker
     - proxy

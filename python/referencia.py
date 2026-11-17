@@ -51,7 +51,6 @@ while True:
             rep.status = "erro"
         else:
             vistos[req.nome] = time()
-            rep.hora = time()
 
     else:
         rep.status = "erro"

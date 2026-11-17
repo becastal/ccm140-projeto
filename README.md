@@ -43,9 +43,28 @@ Como o broker reparte os pedidos entre os servidores (round-robin), cada servido
 **Serviço de referência** (`python/referencia.py`, REP na porta 5559), mensagens `Controle`:
 - `rank`: o servidor manda o nome e recebe o rank. Os ranks são dados em ordem de chegada (1, 2, 3...) e um nome repetido recebe o mesmo rank de antes;
 - `list`: devolve nome e rank dos servidores ativos;
-- `heartbeat`: cada servidor manda a cada 10 mensagens de clientes recebidas. Quem fica mais de 30 s sem mandar sai da lista (volta quando mandar de novo). A resposta traz a hora certa (`hora`).
+- `heartbeat`: cada servidor manda a cada 10 mensagens de clientes recebidas. Quem fica mais de 30 s sem mandar sai da lista (volta quando mandar de novo).
 
-**Relógio físico:** como todos os containers usam a hora do mesmo computador, cada servidor começa com um desvio aleatório entre -5 s e +5 s, para a sincronização aparecer. No heartbeat o servidor acerta o relógio com a hora da referência, somando metade do tempo de ida e volta da mensagem (algoritmo de Cristian), e mostra o desvio antes e depois.
+**Relógio físico:** como todos os containers usam a hora do mesmo computador, cada servidor começa com um desvio aleatório entre -5 s e +5 s, para a sincronização aparecer nos logs.
+
+## Coordenador, Berkeley e eleição
+
+Cada servidor tem uma thread com um REP na porta 5560 que atende os outros servidores (`relogio` e `eleicao`), e guarda na variável `coordenador` o nome do coordenador atual.
+
+**Sincronização (Berkeley), a cada 15 mensagens de clientes:**
+- o coordenador pede a hora de todos os servidores ativos, calcula a diferença de cada um para a sua (descontando metade do tempo de ida e volta), tira a média e acerta o próprio relógio com ela;
+- os outros pedem a hora correta ao coordenador (REQ `relogio` / REP com `hora`) e acertam o relógio com ela.
+
+O efeito é o mesmo do Berkeley original (todos acabam na média), só que a correção chega aos outros servidores pelo pedido deles, como no diagrama do enunciado. A referência não manda mais a hora no heartbeat.
+
+**Eleição (algoritmo do valentão):** começa quando o servidor sobe, quando o coordenador não responde ao pedido de hora, ou quando chega um pedido de eleição de um servidor de rank menor.
+1. O servidor manda `eleicao` para todos os servidores ativos de rank maior (lista da referência).
+2. Se algum responder OK, ele espera o anúncio do novo coordenador por 5 s (se não vier, faz outra eleição).
+3. Se ninguém responder, ele é o coordenador e publica o próprio nome e rank no tópico `servers`.
+
+Todos os servidores assinam o tópico `servers`. Se chegar o anúncio de um servidor de rank menor que o seu, o servidor faz uma eleição nova (é o que acontece quando os servidores sobem juntos).
+
+Para ver a eleição: `docker stop` no coordenador. O próximo pedido de hora dá tempo esgotado e o servidor vivo de maior rank assume.
 
 ## Estrutura
 

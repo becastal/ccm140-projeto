@@ -34,8 +34,9 @@ message Servidor {
 }
 
 // mensagens entre os servidores e o servico de referencia (REQ e REP)
+// e entre os servidores (relogio, eleicao e o anuncio do coordenador no topico servers)
 message Controle {
-    string tipo = 1;       // rank, list, heartbeat
+    string tipo = 1;       // rank, list, heartbeat, relogio, eleicao, coordenador
     string nome = 2;
     string status = 3;
     int32 rank = 4;
