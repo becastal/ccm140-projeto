@@ -11,6 +11,7 @@ arquivo = f"dados/{nome}.jsonl"
 
 usuarios = {}   # usuario -> timestamp do ultimo login
 canais = []
+mensagens = 0
 
 # recupera o que ja estava salvo no disco
 if os.path.exists(arquivo):
@@ -21,7 +22,9 @@ if os.path.exists(arquivo):
                 usuarios[evento["usuario"]] = evento["timestamp"]
             elif evento["ev"] == "canal":
                 canais.append(evento["canal"])
-print(f"{nome}: {len(usuarios)} usuarios e {len(canais)} canais carregados do disco", flush=True)
+            elif evento["ev"] == "msg":
+                mensagens += 1
+print(f"{nome}: {len(usuarios)} usuarios, {len(canais)} canais e {mensagens} mensagens carregados do disco", flush=True)
 
 
 def salva(evento):
@@ -38,6 +41,9 @@ nome_valido = re.compile(r"^[a-z0-9_-]{1,20}$")
 context = zmq.Context()
 socket = context.socket(zmq.REP)
 socket.connect("tcp://broker:5556")
+
+pub = context.socket(zmq.PUB)
+pub.connect("tcp://proxy:5557")
 
 while True:
     req = mensagens_pb2.Requisicao()
@@ -68,6 +74,23 @@ while True:
 
     elif req.tipo == "listar":
         rep.canais.extend(canais)
+
+    elif req.tipo == "publicar":
+        if req.canal not in canais:
+            rep.status = "erro"
+            rep.erro = "canal nao existe"
+        elif req.texto == "":
+            rep.status = "erro"
+            rep.erro = "mensagem vazia"
+        else:
+            publicacao = mensagens_pb2.Publicacao()
+            publicacao.canal = req.canal
+            publicacao.usuario = req.usuario
+            publicacao.texto = req.texto
+            publicacao.timestamp = time()
+            print(f"publicado => {mostra(publicacao)}", flush=True)
+            pub.send_multipart([req.canal.encode(), publicacao.SerializeToString()])
+            salva({"ev": "msg", "canal": req.canal, "usuario": req.usuario, "texto": req.texto, "timestamp": req.timestamp})
 
     else:
         rep.status = "erro"

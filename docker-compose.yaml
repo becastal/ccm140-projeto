@@ -8,6 +8,7 @@ x-servidor: &servidor
   <<: *python
   depends_on:
     - broker
+    - proxy
 
 x-bot: &bot
   build:
@@ -16,6 +17,7 @@ x-bot: &bot
   image: cc7261:projeto-cpp
   depends_on:
     - broker
+    - proxy
 
 services:
 
@@ -24,6 +26,12 @@ services:
     container_name: broker
     volumes:
       - ./python/broker.py:/app/main.py
+
+  proxy:
+    <<: *python
+    container_name: proxy
+    volumes:
+      - ./python/proxy.py:/app/main.py
 
   servidor1:
     <<: *servidor
