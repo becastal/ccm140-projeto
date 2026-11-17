@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+// pedido do bot para o servidor (REQ)
+message Requisicao {
+    string tipo = 1;       // login, canal, listar
+    string usuario = 2;
+    string canal = 3;
+    double timestamp = 4;
+}
+
+// resposta do servidor para o bot (REP)
+message Resposta {
+    string status = 1;     // ok ou erro
+    string erro = 2;
+    repeated string canais = 3;
+    double timestamp = 4;
+}

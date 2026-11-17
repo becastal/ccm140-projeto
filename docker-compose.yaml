@@ -1,0 +1,110 @@
+x-python: &python
+  build:
+    context: .
+    dockerfile: python/Dockerfile
+  image: cc7261:projeto-python
+
+x-servidor: &servidor
+  <<: *python
+  depends_on:
+    - broker
+
+x-bot: &bot
+  build:
+    context: .
+    dockerfile: cpp/Dockerfile
+  image: cc7261:projeto-cpp
+  depends_on:
+    - broker
+
+services:
+
+  broker:
+    <<: *python
+    container_name: broker
+    volumes:
+      - ./python/broker.py:/app/main.py
+
+  servidor1:
+    <<: *servidor
+    container_name: servidor1
+    environment:
+      NOME: servidor1
+    volumes:
+      - ./python/servidor.py:/app/main.py
+      - ./dados:/app/dados
+
+  servidor2:
+    <<: *servidor
+    container_name: servidor2
+    environment:
+      NOME: servidor2
+    volumes:
+      - ./python/servidor.py:/app/main.py
+      - ./dados:/app/dados
+
+  servidor3:
+    <<: *servidor
+    container_name: servidor3
+    environment:
+      NOME: servidor3
+    volumes:
+      - ./python/servidor.py:/app/main.py
+      - ./dados:/app/dados
+
+  servidor4:
+    <<: *servidor
+    container_name: servidor4
+    environment:
+      NOME: servidor4
+    volumes:
+      - ./python/servidor.py:/app/main.py
+      - ./dados:/app/dados
+
+  bot1:
+    <<: *bot
+    container_name: bot1
+    environment:
+      NOME: bot1
+
+  bot2:
+    <<: *bot
+    container_name: bot2
+    environment:
+      NOME: bot2
+
+  bot3:
+    <<: *bot
+    container_name: bot3
+    environment:
+      NOME: bot3
+
+  bot4:
+    <<: *bot
+    container_name: bot4
+    environment:
+      NOME: bot4
+
+  bot5:
+    <<: *bot
+    container_name: bot5
+    environment:
+      NOME: bot5
+
+  bot6:
+    <<: *bot
+    container_name: bot6
+    environment:
+      NOME: bot6
+
+  bot7:
+    <<: *bot
+    container_name: bot7
+    environment:
+      NOME: bot7
+
+  bot8:
+    <<: *bot
+    container_name: bot8
+    environment:
+      NOME: bot8
