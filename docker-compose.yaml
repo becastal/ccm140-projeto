@@ -9,6 +9,7 @@ x-servidor: &servidor
   depends_on:
     - broker
     - proxy
+    - referencia
 
 x-bot: &bot
   build:
@@ -32,6 +33,12 @@ services:
     container_name: proxy
     volumes:
       - ./python/proxy.py:/app/main.py
+
+  referencia:
+    <<: *python
+    container_name: referencia
+    volumes:
+      - ./python/referencia.py:/app/main.py
 
   servidor1:
     <<: *servidor

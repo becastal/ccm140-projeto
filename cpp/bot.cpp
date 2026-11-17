@@ -33,6 +33,7 @@ struct Bot {
 	mt19937 rng;
 	vector<string> canais;
 	set<string> inscritos;
+	long long relogio = 0; // relogio logico
 
 	Bot(string nome_) : nome(nome_), sub(ctx, zmq::socket_type::sub), rng(random_device{}()) {
 		conecta();
@@ -51,6 +52,7 @@ struct Bot {
 		r.set_usuario(nome);
 
 		while (true) {
+			r.set_relogio(++relogio);
 			r.set_timestamp(agora());
 			string s; r.SerializeToString(&s);
 			cout << "enviado   -> " << r.ShortDebugString() << endl;
@@ -59,6 +61,7 @@ struct Bot {
 			zmq::message_t m;
 			if (req.recv(m, zmq::recv_flags::none)) {
 				Resposta rep; rep.ParseFromArray(m.data(), m.size());
+				relogio = max(relogio, (long long)rep.relogio());
 				cout << "recebido  <- " << rep.ShortDebugString() << endl;
 				return rep;
 			}
@@ -126,6 +129,7 @@ struct Bot {
 
 			Publicacao p; p.ParseFromArray(m.data(), m.size());
 			if (!inscritos.count(p.canal())) continue; // "geral" tambem pega "geral2" no filtro do zmq
+			relogio = max(relogio, (long long)p.relogio());
 
 			cout << "mensagem  <= [" << p.canal() << "] " << p.usuario() << ": \"" << p.texto() << "\""
 				<< " (enviada " << hora(p.timestamp()) << ", recebida " << hora(chegou) << ") | "

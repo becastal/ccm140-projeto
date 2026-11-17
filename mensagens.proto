@@ -7,6 +7,7 @@ message Requisicao {
     string canal = 3;
     double timestamp = 4;
     string texto = 5;
+    int64 relogio = 6;     // relogio logico de quem envia
 }
 
 // resposta do servidor para o bot (REP)
@@ -15,6 +16,7 @@ message Resposta {
     string erro = 2;
     repeated string canais = 3;
     double timestamp = 4;
+    int64 relogio = 5;
 }
 
 // mensagem publicada pelo servidor no canal (PUB, topico = nome do canal)
@@ -23,4 +25,22 @@ message Publicacao {
     string usuario = 2;
     string texto = 3;
     double timestamp = 4;
+    int64 relogio = 5;
+}
+
+message Servidor {
+    string nome = 1;
+    int32 rank = 2;
+}
+
+// mensagens entre os servidores e o servico de referencia (REQ e REP)
+message Controle {
+    string tipo = 1;       // rank, list, heartbeat
+    string nome = 2;
+    string status = 3;
+    int32 rank = 4;
+    repeated Servidor servidores = 5;
+    double hora = 6;       // hora correta, para acertar o relogio fisico
+    double timestamp = 7;
+    int64 relogio = 8;
 }
