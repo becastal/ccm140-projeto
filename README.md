@@ -14,7 +14,7 @@ São 4 servidores e 8 bots, mais o broker, o proxy e o serviço de referência.
 
 **Serialização:** Protobuf, o mesmo usado na aula de RPC. As mensagens estão em `mensagens.proto` e são compiladas na criação das imagens (`grpc_tools.protoc` no Python e `protoc` no C++). Toda mensagem leva o `timestamp` do envio.
 
-**Persistência:** cada servidor escreve num arquivo próprio `dados/<servidor>.jsonl`, uma linha por evento (login, canal criado ou mensagem publicada), só acrescentando. Quando o servidor reinicia ele lê o arquivo de novo e recupera os usuários e canais. As mensagens ficam guardadas com canal, usuário, texto e timestamp, então dá para recuperar o histórico inteiro lendo o arquivo.
+**Persistência:** cada servidor escreve num arquivo próprio `dados/<servidor>.jsonl`, uma linha por evento (login, canal criado ou mensagem publicada), só acrescentando. Cada linha tem id, tipo, usuário, canal, texto, timestamp, relógio lógico e o servidor de origem. Quando o servidor reinicia ele lê o arquivo de novo e recupera tudo, e o histórico inteiro de mensagens pode ser lido do arquivo.
 
 **Erros:** o servidor responde `status: "erro"` com o motivo em `erro`:
 - nome de usuário ou canal inválido (só `a-z`, `0-9`, `_`, `-`, até 20 caracteres);
@@ -34,7 +34,7 @@ Se o login der erro o bot tenta de novo depois de 1 s. Se o servidor não respon
 
 Enquanto esperam entre uma mensagem e outra, mostram tudo que chega dos canais inscritos com canal, autor, texto, hora de envio e hora de recebimento.
 
-Como o broker reparte os pedidos entre os servidores (round-robin), cada servidor só conhece os canais que foram criados nele. Por isso aparecem erros `canal nao existe`: isso é resolvido na parte 5 com a réplica.
+Como o broker reparte os pedidos entre os servidores (round-robin), sem réplica cada servidor só conheceria os canais criados nele (nas partes 2 a 4 aparecem erros `canal nao existe` por isso). A parte 5 resolve.
 
 ## Relógios e heartbeat
 
@@ -65,6 +65,20 @@ O efeito é o mesmo do Berkeley original (todos acabam na média), só que a cor
 Todos os servidores assinam o tópico `servers`. Se chegar o anúncio de um servidor de rank menor que o seu, o servidor faz uma eleição nova (é o que acontece quando os servidores sobem juntos).
 
 Para ver a eleição: `docker stop` no coordenador. O próximo pedido de hora dá tempo esgotado e o servidor vivo de maior rank assume.
+
+## Réplica
+
+O broker reparte os pedidos em round-robin, então cada pedido de escrita (login, criar canal, publicar) chega a um servidor só. Para todos terem todos os dados, foi usada **réplica ativa com atualização por push**, das alternativas vistas na aula de consistência e replicação: o servidor que recebe a escrita propaga a **operação** para os outros, e cada um a aplica nos seus dados e no seu arquivo.
+
+Como foi implementado:
+- toda escrita vira um `Evento` (definido no `.proto`) com um id único `<servidor>-<n>`;
+- o servidor aplica o evento, salva no seu arquivo e publica no tópico `replica` do proxy (o mesmo proxy dos canais);
+- todos os servidores assinam `replica`. Ao receber um evento de outro servidor, aplicam e salvam se o id ainda não foi visto. O id evita aplicar duas vezes;
+- **mudança no método:** quem estava fora do ar perde as publicações (o pub/sub não guarda nada). Por isso, ao subir, o servidor pede a outro servidor ativo (REQ `sincronizar` na porta 5560) todos os eventos que ele tem e aplica os que faltam. É uma atualização por pull, só na entrada.
+
+A consistência é **eventual**: por alguns milissegundos um servidor pode ainda não ter um evento que outro já tem. Depois que as escritas param, todos ficam iguais. Se dois servidores criarem o mesmo canal ao mesmo tempo, os dois eventos são aplicados e o canal aparece uma vez só na lista, então o conflito não tem efeito. Cada mensagem guarda o timestamp e o relógio lógico, que servem para ordenar o histórico.
+
+Para conferir: com tudo rodando, os arquivos em `dados/` ficam com os mesmos ids. Dá para fazer `docker stop servidor3`, esperar um pouco e `docker start servidor3`: ele lê o próprio arquivo e pega com outro servidor o que perdeu.
 
 ## Estrutura
 

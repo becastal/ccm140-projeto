@@ -14,6 +14,9 @@ arquivo = f"dados/{nome}.jsonl"
 usuarios = {}   # usuario -> timestamp do ultimo login
 canais = []
 mensagens = 0
+eventos = []    # todos os eventos aplicados, na ordem em que chegaram
+vistos = set()  # ids dos eventos ja aplicados
+contador = 0    # para gerar o id dos eventos criados aqui
 
 relogio = 0     # relogio logico
 recebidas = 0   # mensagens de clientes recebidas (heartbeat a cada 10, relogio a cada 15)
@@ -45,17 +48,46 @@ def atualiza(recebido):
         relogio = max(relogio, recebido)
 
 
+campos = ["id", "ev", "usuario", "canal", "texto", "timestamp", "relogio", "origem"]
+
+
+def para_evento(d):
+    e = mensagens_pb2.Evento()
+    for c in campos:
+        if c in d:
+            setattr(e, c, d[c])
+    return e
+
+
+def para_dict(e):
+    return {c: getattr(e, c) for c in campos}
+
+
+# aplica um evento nos dados em memoria; devolve False se ja tinha sido aplicado
+def aplica(evento):
+    global mensagens
+    if evento["id"] in vistos:
+        return False
+    vistos.add(evento["id"])
+    eventos.append(evento)
+    if evento["ev"] == "login":
+        usuarios[evento["usuario"]] = evento["timestamp"]
+    elif evento["ev"] == "canal":
+        if evento["canal"] not in canais:
+            canais.append(evento["canal"])
+    elif evento["ev"] == "msg":
+        mensagens += 1
+    return True
+
+
 # recupera o que ja estava salvo no disco
 if os.path.exists(arquivo):
     with open(arquivo) as f:
         for linha in f:
             evento = json.loads(linha)
-            if evento["ev"] == "login":
-                usuarios[evento["usuario"]] = evento["timestamp"]
-            elif evento["ev"] == "canal":
-                canais.append(evento["canal"])
-            elif evento["ev"] == "msg":
-                mensagens += 1
+            aplica(evento)
+            if evento.get("origem") == nome:
+                contador = max(contador, int(evento["id"].split("-")[-1]))
 print(f"{nome}: {len(usuarios)} usuarios, {len(canais)} canais e {mensagens} mensagens carregados do disco", flush=True)
 print(f"{nome}: relogio fisico comeca com desvio de {desvio:+.3f}s", flush=True)
 
@@ -66,6 +98,12 @@ def salva(evento):
 
 
 def mostra(msg):
+    if isinstance(msg, mensagens_pb2.Controle) and len(msg.eventos) > 3:
+        # a resposta do sincronizar pode ter milhares de eventos: mostra so os 3 primeiros
+        resumo = mensagens_pb2.Controle()
+        resumo.CopyFrom(msg)
+        del resumo.eventos[3:]
+        return text_format.MessageToString(resumo, as_one_line=True) + f" ... ({len(msg.eventos)} eventos)"
     return text_format.MessageToString(msg, as_one_line=True)
 
 
@@ -82,6 +120,7 @@ pub.connect("tcp://proxy:5557")
 sub = context.socket(zmq.SUB)
 sub.connect("tcp://proxy:5558")
 sub.setsockopt_string(zmq.SUBSCRIBE, "servers")
+sub.setsockopt_string(zmq.SUBSCRIBE, "replica")
 
 
 # REQ com tempo limite: cria o socket, manda, espera a resposta e fecha.
@@ -115,8 +154,8 @@ def pede_referencia(req):
     return pede("referencia:5559", req, 2000)
 
 
-def pede_servidor(outro, req):
-    return pede(f"{outro}:5560", req)
+def pede_servidor(outro, req, espera=1000):
+    return pede(f"{outro}:5560", req, espera)
 
 
 # atende os pedidos dos outros servidores (relogio e eleicao) em outra thread
@@ -139,6 +178,9 @@ def atende_servidores():
         elif req.tipo == "eleicao":
             # alguem com rank menor pediu eleicao: respondo OK e faco a minha
             precisa_eleicao = True
+        elif req.tipo == "sincronizar":
+            # servidor que acabou de entrar pede tudo que eu tenho
+            rep.eventos.extend(para_evento(e) for e in list(eventos))
         else:
             rep.status = "erro"
 
@@ -158,6 +200,37 @@ while rank is None:
     else:
         sleep(1)
 print(f"{nome}: meu rank e {rank}", flush=True)
+
+
+# replica ativa: todo evento novo e salvo aqui e publicado para os outros
+def novo_evento(ev, req):
+    global contador
+    contador += 1
+    evento = {"id": f"{nome}-{contador}", "ev": ev, "usuario": req.usuario, "canal": req.canal,
+              "texto": req.texto, "timestamp": req.timestamp, "relogio": req.relogio, "origem": nome}
+    aplica(evento)
+    salva(evento)
+    replica = para_evento(evento)
+    print(f"publicado => [replica] {mostra(replica)}", flush=True)
+    pub.send_multipart([b"replica", replica.SerializeToString()])
+
+
+# ao entrar, pega com outro servidor os eventos que perdeu enquanto estava fora
+def sincroniza_dados():
+    for s in servidores_ativos():
+        if s.nome == nome:
+            continue
+        rep = pede_servidor(s.nome, mensagens_pb2.Controle(tipo="sincronizar"), 5000)
+        if rep is None:
+            continue
+        novos = 0
+        for e in rep.eventos:
+            evento = para_dict(e)
+            if aplica(evento):
+                salva(evento)
+                novos += 1
+        print(f"{nome}: {novos} eventos novos recebidos de {s.nome}", flush=True)
+        return
 
 
 def servidores_ativos():
@@ -239,6 +312,7 @@ def sincroniza():
     print(f"relogio acertado com o coordenador {coordenador}: desvio {antes:+.3f}s -> {desvio:+.3f}s", flush=True)
 
 
+sincroniza_dados()
 precisa_eleicao = True
 
 poller = zmq.Poller()
@@ -248,8 +322,21 @@ poller.register(sub, zmq.POLLIN)
 while True:
     socks = dict(poller.poll(500))
 
+    topico = None
     if socks.get(sub) == zmq.POLLIN:
         topico, dados = sub.recv_multipart()
+
+    if topico == b"replica":
+        replica = mensagens_pb2.Evento()
+        replica.ParseFromString(dados)
+        atualiza(replica.relogio)
+        if replica.origem != nome:
+            print(f"recebido  <= [replica] {mostra(replica)}", flush=True)
+            evento = para_dict(replica)
+            if aplica(evento):
+                salva(evento)
+
+    elif topico == b"servers":
         anuncio = mensagens_pb2.Controle()
         anuncio.ParseFromString(dados)
         atualiza(anuncio.relogio)
@@ -286,8 +373,7 @@ while True:
             rep.status = "erro"
             rep.erro = "nome de usuario invalido"
         else:
-            usuarios[req.usuario] = req.timestamp
-            salva({"ev": "login", "usuario": req.usuario, "timestamp": req.timestamp, "relogio": req.relogio})
+            novo_evento("login", req)
 
     elif req.tipo == "canal":
         if not nome_valido.match(req.canal) or req.canal in reservados:
@@ -297,8 +383,7 @@ while True:
             rep.status = "erro"
             rep.erro = "canal ja existe"
         else:
-            canais.append(req.canal)
-            salva({"ev": "canal", "canal": req.canal, "usuario": req.usuario, "timestamp": req.timestamp, "relogio": req.relogio})
+            novo_evento("canal", req)
 
     elif req.tipo == "listar":
         rep.canais.extend(canais)
@@ -319,7 +404,7 @@ while True:
             publicacao.relogio = incrementa()
             print(f"publicado => {mostra(publicacao)}", flush=True)
             pub.send_multipart([req.canal.encode(), publicacao.SerializeToString()])
-            salva({"ev": "msg", "canal": req.canal, "usuario": req.usuario, "texto": req.texto, "timestamp": req.timestamp, "relogio": req.relogio})
+            novo_evento("msg", req)
 
     else:
         rep.status = "erro"

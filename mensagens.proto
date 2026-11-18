@@ -36,7 +36,7 @@ message Servidor {
 // mensagens entre os servidores e o servico de referencia (REQ e REP)
 // e entre os servidores (relogio, eleicao e o anuncio do coordenador no topico servers)
 message Controle {
-    string tipo = 1;       // rank, list, heartbeat, relogio, eleicao, coordenador
+    string tipo = 1;       // rank, list, heartbeat, relogio, eleicao, coordenador, sincronizar
     string nome = 2;
     string status = 3;
     int32 rank = 4;
@@ -44,4 +44,18 @@ message Controle {
     double hora = 6;       // hora correta, para acertar o relogio fisico
     double timestamp = 7;
     int64 relogio = 8;
+    repeated Evento eventos = 9;   // resposta do sincronizar
+}
+
+// tudo que muda os dados de um servidor; vai para o disco e para os outros
+// servidores pelo topico replica
+message Evento {
+    string id = 1;
+    string ev = 2;         // login, canal, msg
+    string usuario = 3;
+    string canal = 4;
+    string texto = 5;
+    double timestamp = 6;
+    int64 relogio = 7;
+    string origem = 8;     // servidor que recebeu o pedido do bot
 }
