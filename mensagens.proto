@@ -8,6 +8,19 @@ message Requisicao {
     double timestamp = 4;
     string texto = 5;
     int64 relogio = 6;     // relogio logico de quem envia
+    Prova prova = 7;       // so no login
+    string sessao = 8;     // devolvida no login, vai em canal e publicar
+}
+
+// prova de conhecimento zero do login (isomorfismo de grafos, nao interativa)
+// o bot prova que conhece pi tal que g1 = pi(g0), sem mostrar pi
+message Prova {
+    int32 n = 1;               // vertices
+    bytes g0 = 2;              // arestas (i, j), i < j, como bits
+    bytes g1 = 3;
+    int64 instante = 4;        // milissegundos, entra no hash
+    repeated bytes h = 5;      // compromisso de cada rodada: sigma(g0)
+    repeated bytes resposta = 6; // permutacao de cada rodada (n bytes)
 }
 
 // resposta do servidor para o bot (REP)
@@ -17,6 +30,7 @@ message Resposta {
     repeated string canais = 3;
     double timestamp = 4;
     int64 relogio = 5;
+    string sessao = 6;
 }
 
 // mensagem publicada pelo servidor no canal (PUB, topico = nome do canal)
@@ -58,4 +72,7 @@ message Evento {
     double timestamp = 6;
     int64 relogio = 7;
     string origem = 8;     // servidor que recebeu o pedido do bot
+    string g0 = 9;         // chave publica do login (hex)
+    string g1 = 10;
+    string sessao = 11;
 }

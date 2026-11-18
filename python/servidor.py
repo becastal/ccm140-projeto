@@ -2,6 +2,8 @@ import os
 import re
 import json
 import random
+import hashlib
+import secrets
 import threading
 import zmq
 from time import time, sleep
@@ -12,6 +14,9 @@ nome = os.environ["NOME"]
 arquivo = f"dados/{nome}.jsonl"
 
 usuarios = {}   # usuario -> timestamp do ultimo login
+chaves = {}     # usuario -> (g0, g1), chave publica do ZKP
+sessoes = {}    # sessao -> usuario
+provas_usadas = set()
 canais = []
 mensagens = 0
 eventos = []    # todos os eventos aplicados, na ordem em que chegaram
@@ -48,7 +53,7 @@ def atualiza(recebido):
         relogio = max(relogio, recebido)
 
 
-campos = ["id", "ev", "usuario", "canal", "texto", "timestamp", "relogio", "origem"]
+campos = ["id", "ev", "usuario", "canal", "texto", "timestamp", "relogio", "origem", "g0", "g1", "sessao"]
 
 
 def para_evento(d):
@@ -72,6 +77,9 @@ def aplica(evento):
     eventos.append(evento)
     if evento["ev"] == "login":
         usuarios[evento["usuario"]] = evento["timestamp"]
+        if evento.get("g0"):
+            chaves.setdefault(evento["usuario"], (evento["g0"], evento["g1"]))
+            sessoes[evento["sessao"]] = evento["usuario"]
     elif evento["ev"] == "canal":
         if evento["canal"] not in canais:
             canais.append(evento["canal"])
@@ -98,6 +106,13 @@ def salva(evento):
 
 
 def mostra(msg):
+    if isinstance(msg, mensagens_pb2.Requisicao) and len(msg.prova.h) > 0:
+        # os 32 compromissos e respostas deixariam a linha enorme
+        resumo = mensagens_pb2.Requisicao()
+        resumo.CopyFrom(msg)
+        del resumo.prova.h[:]
+        del resumo.prova.resposta[:]
+        return text_format.MessageToString(resumo, as_one_line=True) + f" (+{len(msg.prova.h)} compromissos e respostas)"
     if isinstance(msg, mensagens_pb2.Controle) and len(msg.eventos) > 3:
         # a resposta do sincronizar pode ter milhares de eventos: mostra so os 3 primeiros
         resumo = mensagens_pb2.Controle()
@@ -105,6 +120,59 @@ def mostra(msg):
         del resumo.eventos[3:]
         return text_format.MessageToString(resumo, as_one_line=True) + f" ... ({len(msg.eventos)} eventos)"
     return text_format.MessageToString(msg, as_one_line=True)
+
+
+# ---------- verificacao da prova de conhecimento zero do login ----------
+
+N = 20
+RODADAS = 32
+TAMANHO = (N * (N - 1) // 2 + 7) // 8
+
+
+# bytes -> conjunto de arestas (i, j) com i < j
+def grafo(dados):
+    arestas = set()
+    k = 0
+    for i in range(N):
+        for j in range(i + 1, N):
+            if dados[k // 8] >> (k % 8) & 1:
+                arestas.add((i, j))
+            k += 1
+    return arestas
+
+
+# troca os rotulos: a aresta (i, j) vira (p[i], p[j])
+def permuta(p, arestas):
+    return {tuple(sorted((p[i], p[j]))) for i, j in arestas}
+
+
+# devolve None se a prova estiver certa, ou o motivo do erro
+def confere_prova(usuario, prova):
+    if prova.n != N or len(prova.h) != RODADAS or len(prova.resposta) != RODADAS:
+        return "prova mal formada"
+    if any(len(g) != TAMANHO for g in [prova.g0, prova.g1, *prova.h]):
+        return "prova mal formada"
+    if abs(prova.instante - time() * 1000) > 30000:
+        return "prova velha"
+    if usuario in chaves and chaves[usuario] != (prova.g0.hex(), prova.g1.hex()):
+        return "chave nao confere com a cadastrada"
+
+    # as moedas sao o hash dos compromissos (Fiat-Shamir): o bot nao escolhe
+    resumo = hashlib.sha256(usuario.encode() + prova.instante.to_bytes(8, "big") +
+                            prova.g0 + prova.g1 + b"".join(prova.h)).digest()
+    if resumo in provas_usadas:
+        return "prova ja usada"
+
+    g = [grafo(prova.g0), grafo(prova.g1)]
+    for i in range(RODADAS):
+        moeda = resumo[i // 8] >> (i % 8) & 1
+        p = list(prova.resposta[i])
+        # moeda 0: p tem que levar g0 em h; moeda 1: p tem que levar g1 em h
+        if sorted(p) != list(range(N)) or permuta(p, g[moeda]) != grafo(prova.h[i]):
+            return f"prova invalida: rodada {i + 1} falhou"
+
+    provas_usadas.add(resumo)
+    return None
 
 
 nome_valido = re.compile(r"^[a-z0-9_-]{1,20}$")
@@ -203,11 +271,11 @@ print(f"{nome}: meu rank e {rank}", flush=True)
 
 
 # replica ativa: todo evento novo e salvo aqui e publicado para os outros
-def novo_evento(ev, req):
+def novo_evento(ev, req, extra={}):
     global contador
     contador += 1
     evento = {"id": f"{nome}-{contador}", "ev": ev, "usuario": req.usuario, "canal": req.canal,
-              "texto": req.texto, "timestamp": req.timestamp, "relogio": req.relogio, "origem": nome}
+              "texto": req.texto, "timestamp": req.timestamp, "relogio": req.relogio, "origem": nome, **extra}
     aplica(evento)
     salva(evento)
     replica = para_evento(evento)
@@ -369,11 +437,23 @@ while True:
     rep.status = "ok"
 
     if req.tipo == "login":
+        problema = None
         if not nome_valido.match(req.usuario):
-            rep.status = "erro"
-            rep.erro = "nome de usuario invalido"
+            problema = "nome de usuario invalido"
         else:
-            novo_evento("login", req)
+            problema = confere_prova(req.usuario, req.prova)
+        if problema:
+            rep.status = "erro"
+            rep.erro = problema
+            print(f"login de {req.usuario} recusado: {problema}", flush=True)
+        else:
+            rep.sessao = secrets.token_hex(8)
+            print(f"login de {req.usuario} aceito: prova com {RODADAS} rodadas conferida", flush=True)
+            novo_evento("login", req, {"g0": req.prova.g0.hex(), "g1": req.prova.g1.hex(), "sessao": rep.sessao})
+
+    elif req.tipo in ["canal", "publicar"] and sessoes.get(req.sessao) != req.usuario:
+        rep.status = "erro"
+        rep.erro = "sessao invalida"
 
     elif req.tipo == "canal":
         if not nome_valido.match(req.canal) or req.canal in reservados:

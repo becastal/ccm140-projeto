@@ -6,7 +6,7 @@ Versão simples de um sistema tipo BBS/IRC: bots fazem login, criam canais e pub
 docker compose up
 ```
 
-São 4 servidores e 8 bots, mais o broker, o proxy e o serviço de referência.
+São 4 servidores e 8 bots, mais o broker, o proxy, o serviço de referência e um bot impostor.
 
 ## Escolhas
 
@@ -80,6 +80,26 @@ A consistência é **eventual**: por alguns milissegundos um servidor pode ainda
 
 Para conferir: com tudo rodando, os arquivos em `dados/` ficam com os mesmos ids. Dá para fazer `docker stop servidor3`, esperar um pouco e `docker start servidor3`: ele lê o próprio arquivo e pega com outro servidor o que perdeu.
 
+## Extra: login com prova de conhecimento zero
+
+No enunciado o login é só o nome, então qualquer bot poderia dizer que é outro. Aqui o bot prova que é o dono do nome sem mandar nenhum segredo, usando a prova de conhecimento zero por isomorfismo de grafos.
+
+- Cada bot tem um grafo G0 de 20 vértices e um segredo π, uma troca de nomes dos vértices. G1 = π(G0) é o mesmo grafo com os vértices renomeados. G0 e G1 são públicos (`chaves/publicas/<bot>.pub`) e π fica só com o bot (`chaves/privadas/<bot>.sec`).
+- Em cada rodada o bot renomeia G0 com uma troca sorteada σ e manda o resultado H. A moeda decide o que ele mostra: com 0 mostra σ (como G0 vira H), com 1 mostra σ∘π⁻¹ (como G1 vira H). Só quem sabe π consegue mostrar o segundo. Cada resposta sozinha é uma troca sorteada e não revela π.
+- Quem não sabe π só consegue responder um dos lados, então erra metade das rodadas. São 32 rodadas: chance de 1 em 2³² de passar.
+- O enunciado pede que o login seja 1 REQ e 1 REP, e com o broker em round-robin cada mensagem pode ir para um servidor diferente. Por isso as moedas não são sorteadas pelo servidor: elas saem do SHA-256 de (nome, instante, G0, G1, todos os H) (Fiat-Shamir). O bot manda as 32 rodadas numa mensagem só e qualquer servidor confere.
+- No primeiro login o servidor guarda G0 e G1 do usuário (e isso é replicado). Depois só aceita a mesma chave. Prova com mais de 30 s ou repetida é recusada.
+- O login devolve uma `sessao`, que o bot manda ao criar canal e publicar. Sem sessão válida o pedido é recusado.
+
+O container `impostor` tenta se passar pelo bot1 e é barrado de três jeitos:
+1. login com uma chave inventada: `chave nao confere com a cadastrada`;
+2. login com a chave pública do bot1, chutando as moedas: `prova invalida: rodada N falhou`;
+3. publicar com uma sessão inventada: `sessao invalida`.
+
+Isomorfismo de grafos aleatórios pequenos não é difícil de resolver na prática, então isso é didático. Em sistemas reais a mesma ideia é usada com logaritmo discreto (Schnorr).
+
+Para começar do zero, apague juntos `dados/*.jsonl` e `chaves/*/*.sec`, `chaves/*/*.pub`: se só as chaves sumirem, os servidores recusam a chave nova dos bots.
+
 ## Estrutura
 
 ```
@@ -88,6 +108,7 @@ python/broker.py      ROUTER 5555 (bots) / DEALER 5556 (servidores)
 python/proxy.py       XSUB 5557 (servidores) / XPUB 5558 (bots)
 python/referencia.py  REP 5559
 python/servidor.py
-cpp/bot.cpp
+cpp/bot.cpp           bot e impostor (ALVO=bot1)
 dados/                arquivos dos servidores
+chaves/               chaves do login (publicas e privadas)
 ```

@@ -1,2 +1,5 @@
 board/
 dados/*.jsonl
+chaves/*/*.sec
+chaves/*/*.pub
+*.un~

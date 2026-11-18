@@ -21,6 +21,9 @@ x-bot: &bot
   depends_on:
     - broker
     - proxy
+  volumes:
+    - ./chaves/privadas:/app/chaves/privadas
+    - ./chaves/publicas:/app/chaves/publicas
 
 services:
 
@@ -125,3 +128,12 @@ services:
     container_name: bot8
     environment:
       NOME: bot8
+
+  # tenta se passar pelo bot1 sem saber o segredo dele (so ve as chaves publicas)
+  impostor:
+    <<: *bot
+    container_name: impostor
+    environment:
+      ALVO: bot1
+    volumes:
+      - ./chaves/publicas:/app/chaves/publicas
