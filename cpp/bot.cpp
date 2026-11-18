@@ -26,7 +26,7 @@ const vector<string> FRASES = {
 
 // ---------- prova de conhecimento zero (isomorfismo de grafos) ----------
 
-const int N = 20, RODADAS = 32;
+const int N = 20, RODADAS = 128;
 typedef vector<vector<int>> Grafo;
 
 // aresta (i, j) com i < j vira o bit k, na ordem (0,1), (0,2), ..., (18,19)

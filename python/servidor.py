@@ -125,7 +125,7 @@ def mostra(msg):
 # ---------- verificacao da prova de conhecimento zero do login ----------
 
 N = 20
-RODADAS = 32
+RODADAS = 128
 TAMANHO = (N * (N - 1) // 2 + 7) // 8
 
 

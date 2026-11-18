@@ -48,7 +48,7 @@ O bot prova que é dono do nome sem revelar o segredo (isomorfismo de grafos):
 
 - G0 e G1 = π(G0) são públicos; só o bot sabe π;
 - em cada rodada o bot manda um H (G0 renomeado) e mostra como G0 ou G1 vira H, conforme a moeda. Sem π, só dá para acertar metade;
-- são 32 rodadas numa mensagem só: as moedas saem do SHA-256 dos H (Fiat-Shamir), então o login continua sendo 1 REQ + 1 REP;
+- são 128 rodadas numa mensagem só: as moedas saem do SHA-256 dos H (Fiat-Shamir), então o login continua sendo 1 REQ + 1 REP;
 - o login devolve uma `sessao`, exigida para criar canal e publicar.
 
 O `impostor` tenta entrar como bot1 e é barrado.
